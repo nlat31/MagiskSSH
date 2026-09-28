@@ -15,14 +15,34 @@
     let autostart = $state(false);
     let keepData = $state(true);
     let isSavingSettings = $state(false);
+    let settingsError = $state("");
+
+    async function loadSettings() {
+        const res = await api("get_settings");
+        const outer = JSON.parse(res.stdout);
+        const data = JSON.parse(outer.stdout);
+        autostart = data.autostart ?? false;
+        keepData = data.keep_data ?? true;
+    }
 
     async function toggleSetting(type: "autostart" | "keepData") {
         if (isSavingSettings) return;
+        const previousAutostart = autostart;
+        const previousKeepData = keepData;
         isSavingSettings = true;
+        settingsError = "";
         try {
             if (type === "autostart") autostart = !autostart;
             if (type === "keepData") keepData = !keepData;
             await api("set_settings", String(autostart), String(keepData));
+            // Read the persisted marker files back instead of trusting the
+            // optimistic UI state.
+            await loadSettings();
+        } catch (e) {
+            autostart = previousAutostart;
+            keepData = previousKeepData;
+            settingsError = e instanceof Error ? e.message : String(e);
+            console.error("[Settings] Save failed:", e);
         } finally {
             isSavingSettings = false;
         }
@@ -73,20 +93,10 @@
             .catch(() => {});
 
         // 获取设置
-        api("get_settings")
-            .then((res) => {
-                try {
-                    const outer = JSON.parse(res.stdout);
-                    // 业务 JSON 还在 stdout 里
-                    const data = JSON.parse(outer.stdout);
-                    autostart = data.autostart ?? false;
-                    keepData = data.keep_data ?? true;
-                } catch (e) {
-                    console.error("[Settings] Parse error:", e, res.stdout);
-                }
-            })
+        loadSettings()
             .catch((err) => {
                 console.error("[Settings] Fetch error:", err);
+                settingsError = err instanceof Error ? err.message : String(err);
             });
     });
 </script>
@@ -157,6 +167,9 @@
         >
             {$_("app.status.settings")}
         </h3>
+        {#if settingsError}
+            <p class="text-xs text-rose-500 break-all">{settingsError}</p>
+        {/if}
 
         <!-- 开机自启 -->
         <div class="flex items-start justify-between">

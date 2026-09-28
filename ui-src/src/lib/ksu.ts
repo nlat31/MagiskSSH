@@ -40,17 +40,19 @@ let cachedModDir: string | null = null;
 function getModDir(): string {
     if (cachedModDir) return cachedModDir;
     if (isMock) {
-        cachedModDir = '/data/adb/modules/MagiskSSH';
+        cachedModDir = '/data/adb/modules/ssh';
         return cachedModDir;
     }
     try {
-        const info = kernelsu.moduleInfo();
-        // moduleInfo() returns a JSON string, e.g.:
-        // {"moduleDir":"/data/adb/modules/ssh","id":"ssh",...}
-        const parsed = JSON.parse(info) as { moduleDir?: string };
-        cachedModDir = (parsed.moduleDir ?? '').trim() || '/data/adb/modules/MagiskSSH';
+        // KernelSU/APatch return the current module ID, not a JSON object.
+        const moduleId = kernelsu.moduleInfo().trim();
+        if (!/^[A-Za-z0-9._-]+$/.test(moduleId)) {
+            throw new Error(`Invalid module ID: ${moduleId}`);
+        }
+        cachedModDir = `/data/adb/modules/${moduleId}`;
     } catch {
-        cachedModDir = '/data/adb/modules/MagiskSSH';
+        // module.prop uses id=ssh.
+        cachedModDir = '/data/adb/modules/ssh';
     }
     return cachedModDir;
 }
@@ -82,6 +84,7 @@ export async function api(action: string, ...args: string[]): Promise<{ errno: n
     const cmd = `sh ${getApiScript()} ${action} ${args.join(' ')}`.trim();
     const result = await exec(cmd);
     debugLog('api ◀', { action, ms: +(performance.now() - t0).toFixed(1), result });
+    assertApiSuccess(result);
     return result;
 }
 
@@ -93,7 +96,25 @@ export async function apiWithStdin(action: string, content: string): Promise<{ e
     const cmd = `echo '${b64}' | sh ${getApiScript()} ${action}`;
     const result = await exec(cmd);
     debugLog('apiWithStdin ◀', { action, ms: +(performance.now() - t0).toFixed(1), result });
+    assertApiSuccess(result);
     return result;
+}
+
+function assertApiSuccess(result: { errno: number; stdout: string; stderr: string }): void {
+    if (result.errno !== 0) {
+        throw new Error(result.stderr.trim() || `Command failed with exit code ${result.errno}`);
+    }
+
+    let response: { errno?: number; stderr?: string };
+    try {
+        response = JSON.parse(result.stdout);
+    } catch {
+        throw new Error(result.stderr.trim() || result.stdout.trim() || 'Invalid API response');
+    }
+
+    if (response.errno !== 0) {
+        throw new Error(response.stderr?.trim() || 'API request failed');
+    }
 }
 
 // --- spawn wrapper (non-blocking, for streaming) ------------------------------

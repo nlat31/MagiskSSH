@@ -12,6 +12,7 @@
     let autoScroll = $state(true);
     let timer: ReturnType<typeof setInterval> | null = null;
     let nextLine = 1; // 下次从第几行开始读（1-based）
+    let logError = $state("");
 
     function appendLines(newLines: string[]) {
         if (newLines.length === 0) return;
@@ -26,6 +27,7 @@
     async function poll() {
         try {
             const res = await api("read_log_from", String(nextLine));
+            logError = "";
             const outer = JSON.parse(res.stdout);
             const b64 = outer.stdout || "";
             if (!b64.trim()) return;
@@ -52,6 +54,7 @@
             appendLines(newLines);
         } catch (e) {
             console.error("[Logs] Poll failed", e);
+            logError = e instanceof Error ? e.message : String(e);
         }
     }
 
@@ -112,7 +115,9 @@
         onscroll={handleScroll}
         class="flex-1 p-4 overflow-y-auto font-mono text-xs leading-5 text-emerald-400/90 whitespace-pre-wrap selection:bg-emerald-900/50"
     >
-        {#if logs.length === 0}
+        {#if logError}
+            <p class="text-rose-400 break-all">{logError}</p>
+        {:else if logs.length === 0}
             <p class="text-slate-600 italic">Waiting for logs...</p>
         {:else}
             {#each logs as logRow}
